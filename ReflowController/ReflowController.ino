@@ -28,15 +28,17 @@
 
 //#define DEBUG
 
-#define VERSION "2.80m"  // bump minor version number on small changes, major on large changes, eg when eeprom layout changes
+#define VERSION "2.81m"  // bump minor version number on small changes, major on large changes, eg when eeprom layout changes
 
 //--- default parameters -------------------------
 
-#define WindowSize 100        // control loop duration in milliseconds
+#define WindowSize 500        // control loop duration in milliseconds
+                              // this value controls PWM frequency as well
+                              // slower fan PWM requires lower idle fan speed
 
 #define idleTemp 50               // the temperature at which to consider the oven safe to leave to cool naturally
 #define preheatTemp 70            // preheat temperature
-#define fanAssistSpeedDefault 33  // default fan speed
+#define fanAssistSpeedDefault 30  // default fan speed
 #define MINIMUM_FAN           10  // minimum fan speed
 
 #define offsetFanSpeed 481    // 30 * 16 + 1 one byte wide
@@ -52,7 +54,7 @@
 //--- thermo couples -----------------------------
 #define cs1 10          // TC1 pin
 #define cs2 2           // TC2 pin
-#define tcUpdateInterval WindowSize/5  // sample temperture more often than PID update
+#define tcUpdateInterval WindowSize/10  // sample temperture more often than PID update
 
 MAX31855 tc1(cs1, tcUpdateInterval);
 MAX31855 tc2(cs2, tcUpdateInterval);
@@ -73,6 +75,51 @@ struct profileValues {
 
 // fan speed* to be included in the profile setting
 int fanAssistSpeed = fanAssistSpeedDefault;
+
+//--- global variables -------------------------------------
+
+// a handful of timer variables
+unsigned long startTime, stateChangedTime = 0;
+
+// PID
+double Setpoint, Input, Output;
+
+//Define the PID tuning parameters
+//double Kp = 4, Ki = 0.05, Kd = 2;
+//double fanKp = 1, fanKi = 0.03, fanKd = 10;
+#define Kp    (6.0)
+#define Ki    (0.05*WindowSize/100)   // scale for the actual sample time
+#define Kd    (1.0*100/WindowSize)
+#define fanKp (7.0)
+#define fanKi (0.03*WindowSize/100)
+#define fanKd (1*100/WindowSize)
+
+//Specify the links and initial tuning parameters
+PID PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
+
+// heater & fan control
+unsigned int fanValue, heaterValue;
+
+// PWM control time window
+unsigned long windowStartTime;
+
+// vars for keeping track of the temperature ramp (for 1 second)
+#define NUMREADINGS (1000/WindowSize)   // 10
+double airTemp[NUMREADINGS];
+double rampRate = 0;
+
+// state machine bits
+enum state {
+  idle,
+  preHeat,
+  rampToSoak,
+  soak,
+  rampToPeak,
+  peak,
+  rampDown,
+  coolDown,
+  drying
+} currentState = idle, lastState = idle;
 
 
 //--- initialize LCD -----------------------------
@@ -106,51 +153,6 @@ MenuItemIntegerAction fan_control;
 //MenuItemAction save_fan_speed;
 // Factory Reset is not needed and rather dangerous
 //MenuItemAction factory_reset;
-
-//--- global variables -------------------------------------
-
-// a handful of timer variables
-unsigned long startTime, stateChangedTime = 0;
-
-// PID
-double Setpoint, Input, Output;
-
-//Define the PID tuning parameters
-//double Kp = 4, Ki = 0.05, Kd = 2;
-//double fanKp = 1, fanKi = 0.03, fanKd = 10;
-#define Kp    (6.0)
-#define Ki    (0.05*WindowSize/100)   // scale for the actual sample time
-#define Kd    (1.0*100/WindowSize)
-#define fanKp (8.0)
-#define fanKi (0.03*WindowSize/100)
-#define fanKd (1*100/WindowSize)
-
-//Specify the links and initial tuning parameters
-PID PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
-
-// heater & fan control
-unsigned int fanValue, heaterValue;
-
-// PWM control time window
-unsigned long windowStartTime;
-
-// vars for keeping track of the temperature ramp (for 1 second)
-#define NUMREADINGS (1000/WindowSize)   // 10
-double airTemp[NUMREADINGS];
-double rampRate = 0;
-
-// state machine bits
-enum state {
-  idle,
-  preHeat,
-  rampToSoak,
-  soak,
-  rampToPeak,
-  peak,
-  rampDown,
-  coolDown,
-  drying
-} currentState = idle, lastState = idle;
 
 
 //==============================================================================
@@ -486,16 +488,14 @@ void loop()
 
   if (currentState == idle) {
     myMenu.poll();
-  }
-
+  } else
   if (isStopKeyPressed()) { // if the key pressed
 #ifdef DEBUG
     Serial.println("-stop key-");
 #endif
     if (currentState == coolDown) {
       currentState = idle;
-    }
-    else if (currentState != idle) {
+    } else {
       currentState = coolDown;
     }
   }
@@ -504,27 +504,26 @@ void loop()
   tc1.update();
   tc2.update();
 
-  //------------------------------------------------------------------
-  // execute every WindowSize milliseconds
+  if (tc1.getStatus() != 0) {
+    abortWithError(3);
+  }
+
+  Input = tc1.getTemperature(); // update the variable the PID reads
+
   // compute PID and update output -----------------------------------
   if (PID.Compute()) {
 
-    if (tc1.getStatus() != 0) {
-      abortWithError(3);
-    }
-
     // calculate the temperature delta per second --------------------
-    rampRate = tc1.getTemperature() - airTemp[0]; // subtract earliest reading from the current one
+    rampRate = Input - airTemp[0]; // subtract earliest reading from the current one
     // this gives us the rate of rise in degrees per polling cycle time/ num readings
 
     // need to keep track of a few past readings in order to work out rate of rise
     for (int i = 1; i < NUMREADINGS; i++) { // iterate over all previous entries, moving them backwards one index
       airTemp[i - 1] = airTemp[i];
     }
-    airTemp[NUMREADINGS - 1] = tc1.getTemperature(); // update the last index with the newest average
+    airTemp[NUMREADINGS - 1] = Input; // update the last index with the newest average
 
     //----------------------------------------------------------------
-    Input = tc1.getTemperature(); // update the variable the PID reads
 
     // if the state has changed, set the flags and update the time of state change
     if (currentState != lastState) {

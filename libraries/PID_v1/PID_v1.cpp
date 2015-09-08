@@ -54,13 +54,14 @@ bool PID::Compute()
       /*Compute all the working error variables*/
       double input = *myInput;
       double error = *mySetpoint - input;
-      ITerm+= (ki * error);
-      if(ITerm > outMax) ITerm= outMax;
-      else if(ITerm < outMin) ITerm= outMin;
+      ITerm += (ki * error);
+      if(ITerm > outMax) ITerm = outMax;
+      else if(ITerm < outMin) ITerm = outMin;
+
       double dInput = (input - lastInput);
 
       /*Compute PID Output*/
-      double output = kp * error + ITerm- kd * dInput;
+      double output = kp * error + ITerm - kd * dInput;
 
       if(output > outMax) output = outMax;
       else if(output < outMin) output = outMin;
@@ -69,7 +70,7 @@ bool PID::Compute()
       /*Remember some variables for next time*/
       lastInput = input;
       lastTime = now;
-	  return true;
+      return true;
    }
    else return false;
 }

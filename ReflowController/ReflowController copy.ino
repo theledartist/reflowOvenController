@@ -28,18 +28,7 @@
 
 //#define DEBUG
 
-#define VERSION "2.72m"  // bump minor version number on small changes, major on large changes, eg when eeprom layout changes
-
-//--- default parameters -------------------------
-
-#define idleTemp 50               // the temperature at which to consider the oven safe to leave to cool naturally
-#define fanAssistSpeedDefault 33  // default fan speed
-#define MINIMUM_FAN           10  // minimum fan speed
-
-#define offsetFanSpeed 481    // 30 * 16 + 1 one byte wide
-#define offsetProfileNum 482  // 30 * 16 + 2 one byte wide
-
-#define WindowSize 100        // control loop duration in milliseconds
+#define VERSION "2.7 mod"  // bump minor version number on small changes, major on large changes, eg when eeprom layout changes
 
 //--- IO pins ------------------------------------
 #define stopKeyInputPin 7
@@ -49,10 +38,21 @@
 //--- thermo couples -----------------------------
 #define cs1 10          // TC1 pin
 #define cs2 2           // TC2 pin
-#define tcUpdateInterval WindowSize/5  // sample temperture more often than PID update
+#define tcUpdateInterval 100
 
 MAX31855 tc1(cs1, tcUpdateInterval);
 MAX31855 tc2(cs2, tcUpdateInterval);
+
+//--- default parameters -------------------------
+
+#define idleTemp 50               // the temperature at which to consider the oven safe to leave to cool naturally
+#define fanAssistSpeedDefault 33  // default fan speed
+
+#define offsetFanSpeed 481    // 30 * 16 + 1 one byte wide
+#define offsetProfileNum 482  // 30 * 16 + 2 one byte wide
+
+#define WindowSize 100        // control loop duration in milliseconds
+
 
 //------------------------------------------------
 // data type for the values used in the reflow profile
@@ -114,12 +114,12 @@ double Setpoint, Input, Output;
 //Define the PID tuning parameters
 //double Kp = 4, Ki = 0.05, Kd = 2;
 //double fanKp = 1, fanKi = 0.03, fanKd = 10;
-#define Kp    (6.0)
+#define Kp    (4)
 #define Ki    (0.05*WindowSize/100)   // scale for the actual sample time
-#define Kd    (1.0*100/WindowSize)
-#define fanKp (8.0)
+#define Kd    (2.0*100/WindowSize)
+#define fanKp (1)
 #define fanKi (0.03*WindowSize/100)
-#define fanKd (1*100/WindowSize)
+#define fanKd (10.0*100/WindowSize)
 
 //Specify the links and initial tuning parameters
 PID PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
@@ -138,7 +138,6 @@ double rampRate = 0;
 // state machine bits
 enum state {
   idle,
-  preHeat,
   rampToSoak,
   soak,
   rampToPeak,
@@ -212,20 +211,10 @@ void displayRampRate(double val)
   char tempStr[6];
   dtostrf(val, 4, 1, tempStr);
   lcd.write((uint8_t)0); // delta symbol
-//  lcd.print(F("Temp "));
+  lcd.print(F("Temp "));
   displayPaddedString(tempStr, 5);
   lcd.print((char)223);// degrees symbol!
   lcd.print(F("C/S"));
-}
-
-void displayTempError(double val)
-{
-  char tempStr[6];
-  dtostrf(val, 4, 1, tempStr);
-  lcd.print(F(" "));
-  displayPaddedString(tempStr, 5);
-  lcd.print((char)223);// degrees symbol!
-  lcd.print(F("C"));
 }
 
 // prints a string of the defined length
@@ -246,9 +235,6 @@ void displayState()
   switch (currentState) {
     case idle:
       displayPaddedString("Idle", 9);
-      break;
-    case preHeat:
-      displayPaddedString("Preheat", 9);
       break;
     case rampToSoak:
       displayPaddedString("Ramp Up", 9);
@@ -325,7 +311,6 @@ void updateDisplay()
 
   lcd.setCursor(0, 3);
   displayRampRate(rampRate);
-  displayTempError(Input - Setpoint);
 }
 
 boolean getJumperState() {
@@ -474,7 +459,7 @@ void setup()
 
 void loop()
 {
-  static unsigned long nextSerialOutput = 0, nextDisplayUpdate = 0;
+  static unsigned long nextUpdate = 0, nextSerialOutput = 0, nextDisplayUpdate = 0;
   static boolean stateChanged = true;
 
   // check for the stop key being pressed ----------------------------
@@ -501,9 +486,8 @@ void loop()
 
   //------------------------------------------------------------------
   // execute every WindowSize milliseconds
-  // compute PID and update output -----------------------------------
-  if (PID.Compute()) {
-    Serial.print(".");
+  if (millis() >= nextUpdate) {
+    nextUpdate = millis() + WindowSize;
 
     if (tc1.getStatus() != 0) {
       abortWithError(3);
@@ -521,6 +505,8 @@ void loop()
 
     //----------------------------------------------------------------
     Input = tc1.getTemperature(); // update the variable the PID reads
+    //Serial.print("Temp1= ");
+    //Serial.println(readings[index]);
 
     // if the state has changed, set the flags and update the time of state change
     if (currentState != lastState) {
@@ -541,47 +527,12 @@ void loop()
     switch (currentState) {
       case idle:
         if (stateChanged) {
-          Serial.print("Idle");
-          Serial.print(" Kp: ");
-          Serial.print((double)fanKp);
-          Serial.print(" Ki: ");
-          Serial.print((double)fanKi);
-          Serial.print(" Kd: ");
-          Serial.print((double)fanKd);
-          Serial.println("");
+          Serial.println("Idle");
           myMenu.showCurrent();
-          PID.SetMode(MANUAL);
           PID.SetControllerDirection(REVERSE);
           PID.SetTunings(fanKp, fanKi, fanKd);
-          Output = 0;
           Setpoint = idleTemp;
           PID.SetMode(AUTOMATIC);
-        }
-        break;
-
-      case preHeat:
-        if (stateChanged) {
-          Serial.print("preHeat");
-          Serial.print(" Kp: ");
-          Serial.print((double)Kp);
-          Serial.print(" Ki: ");
-          Serial.print((double)Ki);
-          Serial.print(" Kd: ");
-          Serial.print((double)Kd);
-          Serial.println("");
-          PID.SetMode(MANUAL);
-          Output = 0;
-          PID.SetControllerDirection(DIRECT);
-          PID.SetTunings(Kp, Ki, Kd);
-          Setpoint = idleTemp;
-          PID.SetMode(AUTOMATIC);
-        }
-        else
-        {
-          if ((Input >= idleTemp)
-           && (millis() - stateChangedTime >= (unsigned long) 30 * 1000)) {
-            currentState = rampToSoak;
-          }
         }
         break;
 
@@ -595,21 +546,19 @@ void loop()
           Serial.print(" Kd: ");
           Serial.print((double)Kd);
           Serial.println("");
-//          PID.SetMode(MANUAL);
-//          Output = WindowSize/4;
+          PID.SetMode(MANUAL);
+          Output = WindowSize/2;
+          PID.SetMode(AUTOMATIC);
           PID.SetControllerDirection(DIRECT);
           PID.SetTunings(Kp, Ki, Kd);
-          Setpoint = Input;
-//          PID.SetMode(AUTOMATIC);
+          Setpoint = Input; //airTemp[NUMREADINGS - 1];
         }
-        else
-        {
-          // adjust the set point
-          Setpoint += (activeProfile.rampUpRate / (1000/WindowSize)); // target set ramp up rate
 
-          if (Setpoint >= activeProfile.soakTemp - 1) {
-            currentState = soak;
-          }
+        // adjust the set point
+        Setpoint += (activeProfile.rampUpRate / (1000/WindowSize)); // target set ramp up rate
+
+        if (Setpoint >= activeProfile.soakTemp - 1) {
+          currentState = soak;
         }
         break;
 
@@ -653,16 +602,13 @@ void loop()
           Serial.println("rampDown");
           PID.SetControllerDirection(REVERSE);
           PID.SetTunings(fanKp, fanKi, fanKd);
-          Setpoint = activeProfile.peakTemp; // was -15 - get it all going with a bit of a kick! v sluggish here otherwise, too hot too long
+          Setpoint = activeProfile.peakTemp - 15; // get it all going with a bit of a kick! v sluggish here otherwise, too hot too long
         }
-        if (Setpoint > idleTemp)
-        {
-          // adjust the set point
-          Setpoint -= (activeProfile.rampDownRate / (1000/WindowSize));
-        } else
-        if (Input <= idleTemp)
-        {
-          currentState = idle;
+        // adjust the set point
+        Setpoint -= (activeProfile.rampDownRate / (1000/WindowSize));
+
+        if (Setpoint <= idleTemp) {
+          currentState = coolDown;
         }
         break;
 
@@ -671,10 +617,12 @@ void loop()
           Serial.println("coolDown");
           PID.SetControllerDirection(REVERSE);
           PID.SetTunings(fanKp, fanKi, fanKd);
-          Setpoint = 0;   // rapid cool down
+          Setpoint = 0; //idleTemp;
         }
         if (Input <= idleTemp) {
           currentState = idle;
+          PID.SetMode(MANUAL);
+          Output = 0;
         }
         break;
     }
@@ -689,6 +637,9 @@ void loop()
   if (Setpoint > Input + 50) abortWithError(1); // if we're 50 degree cooler than setpoint, abort
   //if(Input > Setpoint + 50) abortWithError(2);// or 50 degrees hotter, also abort
 
+  // compute PID and update output -----------------------------------
+  PID.Compute();
+
   // decides which control signal is fed to the output for this cycle
   if (currentState != rampDown
    && currentState != coolDown
@@ -700,10 +651,6 @@ void loop()
   {
     heaterValue = 0;
     fanValue = Output;
-  }
-  // keep fan value above the minimum to make sure the fan actually runs
-  if (fanValue > 0 && fanValue < MINIMUM_FAN*WindowSize/100) {
-    fanValue = MINIMUM_FAN*WindowSize/100;
   }
 
   // PWM control heater & fan ----------------------------------------
@@ -740,7 +687,7 @@ void loop()
 void cycleStart()
 {
   startTime = millis();
-  currentState = preHeat; //rampToSoak;
+  currentState = rampToSoak;
   lcd.clear();
   lcd.print("Starting cycle ");
   lcd.print(profileNumber);
@@ -1035,8 +982,6 @@ void sendSerialUpdate()
     {
       Serial.print("999");
     }
-    Serial.print(", ");
-    Serial.print(Input-Setpoint);
     Serial.println();
   }
 }

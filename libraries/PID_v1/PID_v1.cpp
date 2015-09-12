@@ -52,20 +52,37 @@ bool PID::Compute()
    if(timeChange>=SampleTime)
    {
       /*Compute all the working error variables*/
-      double input = *myInput;
-      double error = *mySetpoint - input;
-      ITerm += (ki * error);
-      if(ITerm > outMax) ITerm = outMax;
-      else if(ITerm < outMin) ITerm = outMin;
+      const double input = *myInput;
+      const double error = *mySetpoint - input;
 
+      ITerm += error * SampleTime/1000;  // error normalized to per second
+#if 0 /*  I-term clamp */
+      const double outRange = outMax - outMin;
+      if (ITerm > outRange) ITerm = outRange;
+      else
+      if (ITerm < (0-outRange)) ITerm = (0-outRange);
+#endif
       double dInput = (input - lastInput);
 
       /*Compute PID Output*/
-      double output = kp * error + ITerm - kd * dInput;
+      double output = (kp * error) + (ki * ITerm) - (kd * dInput);
 
-      if(output > outMax) output = outMax;
-      else if(output < outMin) output = outMin;
+      if (output > outMax) output = outMax;
+      else
+      if (output < outMin) output = outMin;
+
       *myOutput = output;
+#ifdef DEBUG
+          Serial.print(" --- Kp: ");
+          Serial.print(kp);
+          Serial.print(" Ki: ");
+          Serial.print(ki);
+          Serial.print(" ITerm: ");
+          Serial.print(ITerm);
+          Serial.print(" Kd: ");
+          Serial.print(kd);
+          Serial.println(" ---");
+#endif
 
       /*Remember some variables for next time*/
       lastInput = input;
@@ -81,16 +98,16 @@ bool PID::Compute()
  * it's called automatically from the constructor, but tunings can also
  * be adjusted on the fly during normal operation
  ******************************************************************************/
-void PID::SetTunings(double Kp, double Ki, double Kd)
+void PID::SetTunings(double newKp, double newKi, double newKd)
 {
-   if (Kp<0 || Ki<0 || Kd<0) return;
+   if (newKp<0 || newKi<0 || newKd<0) return;
 
-   dispKp = Kp; dispKi = Ki; dispKd = Kd;
+//   dispKp = newKp; dispKi = newKi; dispKd = newKd;
 
-   double SampleTimeInSec = ((double)SampleTime)/1000;
-   kp = Kp;
-   ki = Ki * SampleTimeInSec;
-   kd = Kd / SampleTimeInSec;
+//   const double SampleTimeInSec = SampleTime/1000;
+   kp = newKp;
+   ki = (newKi == 0) ? 0:(newKi * SampleTime/1000);
+   kd = (newKd == 0) ? 0:(newKd * 1000/SampleTime);
 
   if(controllerDirection ==REVERSE)
    {
@@ -107,8 +124,7 @@ void PID::SetSampleTime(int NewSampleTime)
 {
    if (NewSampleTime > 0)
    {
-      double ratio  = (double)NewSampleTime
-                      / (double)SampleTime;
+      const double ratio = NewSampleTime / SampleTime;
       ki *= ratio;
       kd /= ratio;
       SampleTime = (unsigned long)NewSampleTime;
@@ -131,11 +147,13 @@ void PID::SetOutputLimits(double Min, double Max)
 
    if(inAuto)
    {
-	   if(*myOutput > outMax) *myOutput = outMax;
-	   else if(*myOutput < outMin) *myOutput = outMin;
+	   if (*myOutput > outMax) *myOutput = outMax;
+	   else
+	   if (*myOutput < outMin) *myOutput = outMin;
 
-	   if(ITerm > outMax) ITerm= outMax;
-	   else if(ITerm < outMin) ITerm= outMin;
+	   if (ITerm > outMax) ITerm = outMax;
+	   else
+	   if (ITerm < outMin) ITerm = outMin;
    }
 }
 
@@ -162,8 +180,9 @@ void PID::Initialize()
 {
    ITerm = *myOutput;
    lastInput = *myInput;
-   if(ITerm > outMax) ITerm = outMax;
-   else if(ITerm < outMin) ITerm = outMin;
+   if (ITerm > outMax) ITerm = outMax;
+   else
+   if (ITerm < outMin) ITerm = outMin;
 }
 
 /* SetControllerDirection(...)*************************************************
@@ -188,9 +207,10 @@ void PID::SetControllerDirection(int Direction)
  * functions query the internal state of the PID.  they're here for display
  * purposes.  this are the functions the PID Front-end uses for example
  ******************************************************************************/
+/*
 double PID::GetKp(){ return  dispKp; }
 double PID::GetKi(){ return  dispKi;}
 double PID::GetKd(){ return  dispKd;}
 int PID::GetMode(){ return  inAuto ? AUTOMATIC : MANUAL;}
 int PID::GetDirection(){ return controllerDirection;}
-
+*/

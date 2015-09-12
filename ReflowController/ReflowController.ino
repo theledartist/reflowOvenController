@@ -2,6 +2,7 @@
  ESTechnical Reflow Oven Controller
 
  Ed Simmons 2012-2015
+ MOD by Akimitsu Sadoi (aki@theledart.com)
 
  http://www.estechnical.co.uk
 
@@ -28,7 +29,7 @@
 
 //#define DEBUG
 
-#define VERSION "2.81m"  // bump minor version number on small changes, major on large changes, eg when eeprom layout changes
+#define VERSION "2.82m"  // bump minor version number on small changes, major on large changes, eg when eeprom layout changes
 
 //--- default parameters -------------------------
 
@@ -45,6 +46,8 @@
 #define offsetProfileNum 482  // 30 * 16 + 2 one byte wide
 
 #define DEBOUNCE_TIME 50      // button debounce time in milliseconds
+
+#define SOAKSTART_DIFF  3     // start soak this degree lower than set soak temp
 
 //--- IO pins ------------------------------------
 #define stopKeyInputPin 7
@@ -82,17 +85,17 @@ int fanAssistSpeed = fanAssistSpeedDefault;
 unsigned long startTime, stateChangedTime = 0;
 
 // PID
-double Setpoint, Input, Output;
+double Setpoint, Input, Output = 0;
 
-//Define the PID tuning parameters
+//--- PID tuning parameters ------------
 //double Kp = 4, Ki = 0.05, Kd = 2;
 //double fanKp = 1, fanKi = 0.03, fanKd = 10;
-#define Kp    (6.0)
-#define Ki    (0.05*WindowSize/100)   // scale for the actual sample time
-#define Kd    (1.0*100/WindowSize)
-#define fanKp (7.0)
-#define fanKi (0.03*WindowSize/100)
-#define fanKd (1*100/WindowSize)
+#define Kp    (80.0*WindowSize/100) // normalize to percent
+#define Ki    (0.1)  // will be normalized to per second
+#define Kd    (0.5)  // will be normalized to per second
+#define fanKp (20.0*WindowSize/100) // normalize to percent
+#define fanKi (0.1)  // will be normalized to per second
+#define fanKd (0.1)  // will be normalized to per second
 
 //Specify the links and initial tuning parameters
 PID PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
@@ -544,7 +547,7 @@ void loop()
     switch (currentState) {
       case idle:
         if (stateChanged) {
-          Serial.print("Idle");
+          Serial.print("-Idle-");
           Serial.print(" Kp: ");
           Serial.print((double)fanKp);
           Serial.print(" Ki: ");
@@ -568,16 +571,10 @@ void loop()
 
       case preHeat:
         if (stateChanged) {
-          Serial.print("preHeat");
-          Serial.print(" Kp: ");
-          Serial.print((double)Kp);
-          Serial.print(" Ki: ");
-          Serial.print((double)Ki);
-          Serial.print(" Kd: ");
-          Serial.print((double)Kd);
+          Serial.print("-preHeat-");
           Serial.println("");
           PID.SetMode(MANUAL);
-          Output = WindowSize/4;  // start with estimated output value
+          Output = 0; //WindowSize/4;  // start with estimated output value
           PID.SetControllerDirection(DIRECT);
           PID.SetTunings(Kp, Ki, Kd);
           Setpoint = preheatTemp;
@@ -597,20 +594,11 @@ void loop()
 
       case rampToSoak:
         if (stateChanged) {
-          Serial.print("rampToSoak");
-          Serial.print(" Kp: ");
-          Serial.print((double)Kp);
-          Serial.print(" Ki: ");
-          Serial.print((double)Ki);
-          Serial.print(" Kd: ");
-          Serial.print((double)Kd);
+          Serial.print("-rampToSoak-");
           Serial.println("");
-//          PID.SetMode(MANUAL);
-//          Output = WindowSize/4;
           PID.SetControllerDirection(DIRECT);
           PID.SetTunings(Kp, Ki, Kd);
           Setpoint = Input;
-//          PID.SetMode(AUTOMATIC);
         }
         else
         {
@@ -620,7 +608,7 @@ void loop()
           // adjust the set point
           Setpoint += (activeProfile.rampUpRate / (1000/WindowSize)); // target set ramp up rate
 
-          if (Setpoint >= activeProfile.soakTemp - 1) {
+          if (Setpoint >= activeProfile.soakTemp - SOAKSTART_DIFF) {
             currentState = soak;
           }
         }
@@ -628,7 +616,7 @@ void loop()
 
       case soak:
         if (stateChanged) {
-          Serial.println("soak");
+          Serial.println("-soak-");
           Setpoint = activeProfile.soakTemp;
         } else
         {
@@ -643,7 +631,7 @@ void loop()
 
       case rampToPeak:
         if (stateChanged) {
-          Serial.println("rampToPeak");
+          Serial.println("-rampToPeak-");
         } else
         {
           heaterValue = Output;
@@ -661,7 +649,7 @@ void loop()
 
       case peak:
         if (stateChanged) {
-          Serial.println("peak");
+          Serial.println("-peak-");
           Setpoint = activeProfile.peakTemp;
         } else
         {
@@ -676,7 +664,7 @@ void loop()
 
       case rampDown:
         if (stateChanged) {
-          Serial.println("rampDown");
+          Serial.println("-rampDown-");
           PID.SetControllerDirection(REVERSE);
           PID.SetTunings(fanKp, fanKi, fanKd);
           Setpoint = activeProfile.peakTemp;
@@ -699,7 +687,7 @@ void loop()
 
       case coolDown:
         if (stateChanged) {
-          Serial.println("coolDown");
+          Serial.println("-coolDown-");
           PID.SetControllerDirection(REVERSE);
           PID.SetTunings(fanKp, fanKi, fanKd);
           Setpoint = 0;   // rapid cool down
@@ -714,7 +702,7 @@ void loop()
 
       case drying:
         if (stateChanged) {
-          Serial.print("drying");
+          Serial.print("-drying-");
           PID.SetControllerDirection(DIRECT);
           PID.SetTunings(Kp, Ki, Kd);
           Setpoint = preheatTemp;
@@ -1058,10 +1046,10 @@ void sendSerialUpdate()
     Serial.print(", ");
     Serial.print(Setpoint);
     Serial.print(", ");
-    Serial.print(heaterValue);
-    Serial.print(", ");
-    Serial.print(fanValue);
-    Serial.print(", ");
+    Serial.print(heaterValue*100/WindowSize);
+    Serial.print("%, ");
+    Serial.print(fanValue*100/WindowSize);
+    Serial.print("%, ");
     Serial.print(tc1.getTemperature());
     Serial.print(", ");
     if (tc2.getStatus() == 0)

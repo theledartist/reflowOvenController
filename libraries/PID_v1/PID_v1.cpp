@@ -62,7 +62,7 @@ bool PID::Compute()
       else
       if (ITerm < (0-outRange)) ITerm = (0-outRange);
 #endif
-      double dInput = (input - lastInput);
+      const double dInput = (input - lastInput);
 
       /*Compute PID Output*/
       double output = (kp * error) + (ki * ITerm) - (kd * dInput);
@@ -72,6 +72,7 @@ bool PID::Compute()
       if (output < outMin) output = outMin;
 
       *myOutput = output;
+//#define DEBUG 1
 #ifdef DEBUG
           Serial.print(" --- Kp: ");
           Serial.print(kp);
@@ -81,7 +82,7 @@ bool PID::Compute()
           Serial.print(ITerm);
           Serial.print(" Kd: ");
           Serial.print(kd);
-          Serial.println(" ---");
+          Serial.println(" --- ");
 #endif
 
       /*Remember some variables for next time*/

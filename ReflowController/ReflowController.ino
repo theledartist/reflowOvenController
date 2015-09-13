@@ -33,21 +33,21 @@
 
 //--- default parameters -------------------------
 
-#define WindowSize 500        // control loop duration in milliseconds
-                              // this value controls PWM frequency as well
-                              // slower fan PWM requires lower idle fan speed
+#define WindowSize 100            // control loop duration in milliseconds
+                                  // this value controls PWM frequency as well
+                                  // slower fan PWM requires lower idle fan speed
 
 #define idleTemp 50               // the temperature at which to consider the oven safe to leave to cool naturally
 #define preheatTemp 70            // preheat temperature
 #define fanAssistSpeedDefault 30  // default fan speed
 #define MINIMUM_FAN           10  // minimum fan speed
 
-#define offsetFanSpeed 481    // 30 * 16 + 1 one byte wide
-#define offsetProfileNum 482  // 30 * 16 + 2 one byte wide
+#define offsetFanSpeed 481        // 30 * 16 + 1 one byte wide
+#define offsetProfileNum 482      // 30 * 16 + 2 one byte wide
 
-#define DEBOUNCE_TIME 50      // button debounce time in milliseconds
+#define DEBOUNCE_TIME 50          // button debounce time in milliseconds
 
-#define SOAKSTART_DIFF  3     // start soak this degree lower than set soak temp
+#define SOAKSTART_DIFF  3         // start soak this degree lower than set soak temp
 
 //--- IO pins ------------------------------------
 #define stopKeyInputPin 7
@@ -55,12 +55,12 @@
 #define heaterOutPin 9
 
 //--- thermo couples -----------------------------
-#define cs1 10          // TC1 pin
-#define cs2 2           // TC2 pin
+#define TC1_InputPin 10          // TC1 used for control
+#define TC2_InputPin 2           // TC2 is just for display
 #define tcUpdateInterval WindowSize/10  // sample temperture more often than PID update
 
-MAX31855 tc1(cs1, tcUpdateInterval);
-MAX31855 tc2(cs2, tcUpdateInterval);
+MAX31855 tc1(TC1_InputPin, tcUpdateInterval);
+MAX31855 tc2(TC2_InputPin, tcUpdateInterval);
 
 //------------------------------------------------
 // data type for the values used in the reflow profile
@@ -115,6 +115,7 @@ double rampRate = 0;
 enum state {
   idle,
   preHeat,
+  preHeatforever,
   rampToSoak,
   soak,
   rampToPeak,
@@ -134,6 +135,7 @@ LCDMenu myMenu;
 // reflow profile menu items
 
 MenuItemAction control;
+MenuItemAction preheat_start;
 MenuItemAction dryer_start;
 
 MenuItemSubMenu profile;
@@ -373,6 +375,7 @@ void setupMenu()
 
   // initialise the menu strings (stored in the progmem), min and max values, pointers to variables etc
   control.init (F("Reflow Cycle start"),  &cycleStart);
+  preheat_start.init (F("Preheat start"),  &preheatStart);
   dryer_start.init (F("Drying start"),  &dryingStart);
   profile.init (F("Edit Profile"));
   rampUp_rate.init(F("Ramp up rate (C/S)"), &activeProfile.rampUpRate, 0.1, 5.0);
@@ -387,6 +390,7 @@ void setupMenu()
 //  factory_reset.init(F("Factory Reset"),  &factoryReset);
 
   // initialise the menu structure
+  control.addItem(&preheat_start);
   control.addItem(&dryer_start);
   control.addItem(&profile);
   profile.addChild(&rampUp_rate);
@@ -569,12 +573,13 @@ void loop()
         }
         break;
 
+      case preHeatforever:
       case preHeat:
         if (stateChanged) {
           Serial.print("-preHeat-");
           Serial.println("");
           PID.SetMode(MANUAL);
-          Output = 0; //WindowSize/4;  // start with estimated output value
+          Output = 0;
           PID.SetControllerDirection(DIRECT);
           PID.SetTunings(Kp, Ki, Kd);
           Setpoint = preheatTemp;
@@ -585,8 +590,9 @@ void loop()
           heaterValue = Output;
           fanValue = fanAssistSpeed*WindowSize/100;
 
-          if ((Input >= Setpoint)
-           && (millis() - stateChangedTime >= (unsigned long) 30 * 1000)) {
+          if ( (currentState == preHeat)
+            && (Input >= Setpoint)
+            && (millis() - stateChangedTime >= (unsigned long) 30 * 1000) ) {
             currentState = rampToSoak;
           }
         }
@@ -771,6 +777,16 @@ void cycleStart()
   lcd.clear();
   lcd.print("Starting cycle ");
   lcd.print(profileNumber);
+  delay(1000);
+  redrawDisplay = true;
+}
+
+void preheatStart()
+{
+  startTime = millis();
+  currentState = preHeatforever;
+  lcd.clear();
+  lcd.print("Starting preheat");
   delay(1000);
   redrawDisplay = true;
 }

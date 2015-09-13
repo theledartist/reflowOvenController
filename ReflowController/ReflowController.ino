@@ -17,6 +17,7 @@
 #include <PID_v1.h>
 #include <LiquidCrystal.h>
 #include <ParLCD.h>
+#include <LCDMenu.h>
 #include <Encoder.h> // needed by the menu
 #include <MenuItemSelect.h>
 #include <MenuItemInteger.h>
@@ -24,7 +25,6 @@
 #include <MenuItemAction.h>
 #include <MenuItemIntegerAction.h>
 #include <MenuBase.h>
-#include <LCDMenu.h>
 #include <MenuItemSubMenu.h>
 
 //#define DEBUG
@@ -33,21 +33,35 @@
 
 //--- default parameters -------------------------
 
-#define WindowSize 100            // control loop duration in milliseconds
+#define WINDOW_SIZE 250           // control loop duration in milliseconds
                                   // this value controls PWM frequency as well
                                   // slower fan PWM requires lower idle fan speed
 
-#define idleTemp 50               // the temperature at which to consider the oven safe to leave to cool naturally
-#define preheatTemp 70            // preheat temperature
-#define fanAssistSpeedDefault 30  // default fan speed
-#define MINIMUM_FAN           10  // minimum fan speed
+#define IDLE_TEMP     50          // the temperature at which to consider the oven safe to leave to cool naturally
+#define PREHEAT_TEMP  70          // preheat temperature
+#define FANSPEED_DEFAULT 25       // default fan speed
+#define MINIMUM_FAN      10       // minimum fan speed allowed
 
-#define offsetFanSpeed 481        // 30 * 16 + 1 one byte wide
-#define offsetProfileNum 482      // 30 * 16 + 2 one byte wide
+#define OFFSET_FANSPEED 481       // 30 * 16 + 1 one byte wide
+#define OFFSET_PROFNUM 482        // 30 * 16 + 2 one byte wide
 
-#define DEBOUNCE_TIME 50          // button debounce time in milliseconds
+#define DEBOUNCE_TIME   50        // button debounce time in milliseconds
 
-#define SOAKSTART_DIFF  3         // start soak this degree lower than set soak temp
+#define SOAKSTART_DIFF  1         // start soak this degree lower than set soak temp
+#define SOAK_RAMPUP     (0.1)     // ramp-up rate during soak phase
+#define DRYING_TEMP     75        // drying temperature
+#define DRYING_TIME     300       // drying duration in seconds
+
+//--- PID tuning parameters ------------
+//double Kp = 4, Ki = 0.05, Kd = 2;
+//double fanKp = 1, fanKi = 0.03, fanKd = 10;
+#define Kp    (30.0*WINDOW_SIZE/100) // normalize to percent
+#define Ki    (0.2)  // will be normalized to per second
+#define Kd    (18.0)  // will be normalized to per second
+#define fanKp (18.0*WINDOW_SIZE/100) // normalize to percent
+#define fanKi (0.1)  // will be normalized to per second
+#define fanKd (1.5)  // will be normalized to per second
+
 
 //--- IO pins ------------------------------------
 #define stopKeyInputPin 7
@@ -57,7 +71,7 @@
 //--- thermo couples -----------------------------
 #define TC1_InputPin 10          // TC1 used for control
 #define TC2_InputPin 2           // TC2 is just for display
-#define tcUpdateInterval WindowSize/10  // sample temperture more often than PID update
+#define tcUpdateInterval WINDOW_SIZE/10  // sample temperture more often than PID update
 
 MAX31855 tc1(TC1_InputPin, tcUpdateInterval);
 MAX31855 tc2(TC2_InputPin, tcUpdateInterval);
@@ -77,7 +91,7 @@ struct profileValues {
 } activeProfile;
 
 // fan speed* to be included in the profile setting
-int fanAssistSpeed = fanAssistSpeedDefault;
+int fanAssistSpeed = FANSPEED_DEFAULT;
 
 //--- global variables -------------------------------------
 
@@ -86,16 +100,6 @@ unsigned long startTime, stateChangedTime = 0;
 
 // PID
 double Setpoint, Input, Output = 0;
-
-//--- PID tuning parameters ------------
-//double Kp = 4, Ki = 0.05, Kd = 2;
-//double fanKp = 1, fanKi = 0.03, fanKd = 10;
-#define Kp    (80.0*WindowSize/100) // normalize to percent
-#define Ki    (0.1)  // will be normalized to per second
-#define Kd    (0.5)  // will be normalized to per second
-#define fanKp (20.0*WindowSize/100) // normalize to percent
-#define fanKi (0.1)  // will be normalized to per second
-#define fanKd (0.1)  // will be normalized to per second
 
 //Specify the links and initial tuning parameters
 PID PID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);
@@ -107,7 +111,7 @@ unsigned int fanValue, heaterValue;
 unsigned long windowStartTime;
 
 // vars for keeping track of the temperature ramp (for 1 second)
-#define NUMREADINGS (1000/WindowSize)   // 10
+#define NUMREADINGS (1000/WINDOW_SIZE)   // 10
 double airTemp[NUMREADINGS];
 double rampRate = 0;
 
@@ -212,7 +216,7 @@ void displayTemperature(double val)
 
 void displayOutputPower(unsigned int val)
 {
-  val = val*100/WindowSize;
+  val = val*100/WINDOW_SIZE;
   if (val <= 99) lcd.print(" ");
   if (val <= 9) lcd.print(" ");
   lcd.print(val);
@@ -464,8 +468,8 @@ void setup()
   pinMode(fanOutPin, OUTPUT);
   pinMode(heaterOutPin, OUTPUT);
 
-  PID.SetSampleTime(WindowSize);  // adjust for the actual sample time
-  PID.SetOutputLimits(0, WindowSize);
+  PID.SetSampleTime(WINDOW_SIZE);  // adjust for the actual sample time
+  PID.SetOutputLimits(0, WINDOW_SIZE);
   //turn the PID on
   PID.SetMode(AUTOMATIC);
 
@@ -564,7 +568,7 @@ void loop()
           PID.SetControllerDirection(REVERSE);
           PID.SetTunings(fanKp, fanKi, fanKd);
           Output = 0;
-          Setpoint = idleTemp;
+          Setpoint = IDLE_TEMP;
           PID.SetMode(AUTOMATIC);
         } else
         {
@@ -582,13 +586,13 @@ void loop()
           Output = 0;
           PID.SetControllerDirection(DIRECT);
           PID.SetTunings(Kp, Ki, Kd);
-          Setpoint = preheatTemp;
+          Setpoint = PREHEAT_TEMP;
           PID.SetMode(AUTOMATIC);
         }
         else
         {
           heaterValue = Output;
-          fanValue = fanAssistSpeed*WindowSize/100;
+          fanValue = fanAssistSpeed*WINDOW_SIZE/100;
 
           if ( (currentState == preHeat)
             && (Input >= Setpoint)
@@ -609,10 +613,10 @@ void loop()
         else
         {
           heaterValue = Output;
-          fanValue = fanAssistSpeed*WindowSize/100;
+          fanValue = fanAssistSpeed*WINDOW_SIZE/100;
 
           // adjust the set point
-          Setpoint += (activeProfile.rampUpRate / (1000/WindowSize)); // target set ramp up rate
+          Setpoint += (activeProfile.rampUpRate / (1000/WINDOW_SIZE)); // target set ramp up rate
 
           if (Setpoint >= activeProfile.soakTemp - SOAKSTART_DIFF) {
             currentState = soak;
@@ -627,8 +631,11 @@ void loop()
         } else
         {
           heaterValue = Output;
-          fanValue = fanAssistSpeed*WindowSize/100;
+          fanValue = fanAssistSpeed*WINDOW_SIZE/100;
         }
+
+        // adjust the set point
+        Setpoint += (SOAK_RAMPUP / (1000/WINDOW_SIZE)); //
 
         if (millis() - stateChangedTime >= (unsigned long) activeProfile.soakDuration * 1000) {
           currentState = rampToPeak;
@@ -641,11 +648,11 @@ void loop()
         } else
         {
           heaterValue = Output;
-          fanValue = fanAssistSpeed*WindowSize/100;
+          fanValue = fanAssistSpeed*WINDOW_SIZE/100;
         }
 
         // adjust the set point
-        Setpoint += (activeProfile.rampUpRate / (1000/WindowSize)); // target set ramp up rate
+        Setpoint += (activeProfile.rampUpRate / (1000/WINDOW_SIZE)); // target set ramp up rate
 
         if (Setpoint >= activeProfile.peakTemp - 1) { // seems to take arodun 8 degrees rise to tail off to 0 rise
           Setpoint = activeProfile.peakTemp;
@@ -660,7 +667,7 @@ void loop()
         } else
         {
           heaterValue = Output;
-          fanValue = fanAssistSpeed*WindowSize/100;
+          fanValue = fanAssistSpeed*WINDOW_SIZE/100;
         }
 
         if (millis() - stateChangedTime >= (unsigned long) activeProfile.peakDuration * 1000) {
@@ -680,12 +687,12 @@ void loop()
           fanValue = Output;
         }
 
-        if (Setpoint > idleTemp)
+        if (Setpoint > IDLE_TEMP)
         {
           // adjust the set point
-          Setpoint -= (activeProfile.rampDownRate / (1000/WindowSize));
+          Setpoint -= (activeProfile.rampDownRate / (1000/WINDOW_SIZE));
         } else
-        if (Input <= idleTemp)
+        if (Input <= IDLE_TEMP)
         {
           currentState = idle;
         }
@@ -701,7 +708,7 @@ void loop()
         heaterValue = 0;
         fanValue = Output;
 
-        if (Input <= idleTemp) {
+        if (Input <= IDLE_TEMP) {
           currentState = idle;
         }
         break;
@@ -711,14 +718,14 @@ void loop()
           Serial.print("-drying-");
           PID.SetControllerDirection(DIRECT);
           PID.SetTunings(Kp, Ki, Kd);
-          Setpoint = preheatTemp;
+          Setpoint = DRYING_TEMP;
         }
         else
         {
           heaterValue = Output;
-          fanValue = WindowSize;  // fan at full speed
+          fanValue = WINDOW_SIZE;  // fan at full speed
 
-          if (millis() - stateChangedTime >= (unsigned long) 360 * 1000) {
+          if (millis() - stateChangedTime >= (unsigned long) DRYING_TIME * 1000) {
             currentState = coolDown;
           }
         }
@@ -735,15 +742,15 @@ void loop()
   if (Setpoint > Input + 50) abortWithError(1); // if we're 50 degree cooler than setpoint, abort
 
   // keep fan value above the minimum to make sure the fan actually runs
-  if (fanValue > 0 && fanValue < MINIMUM_FAN*WindowSize/100) {
-    fanValue = MINIMUM_FAN*WindowSize/100;
+  if (fanValue > 0 && fanValue < MINIMUM_FAN*WINDOW_SIZE/100) {
+    fanValue = MINIMUM_FAN*WINDOW_SIZE/100;
   }
 
   // PWM control heater & fan ----------------------------------------
 
-  if (millis() - windowStartTime > WindowSize)
+  if (millis() - windowStartTime > WINDOW_SIZE)
   { //time to shift the Relay Window
-    windowStartTime += WindowSize;
+    windowStartTime += WINDOW_SIZE;
   }
 
   if (heaterValue < millis() - windowStartTime) {
@@ -811,7 +818,7 @@ void saveProfile(unsigned int targetProfile)
 #ifdef DEBUG
   Serial.println("Check parameters:");
   Serial.print("idleTemp ");
-  Serial.println(idleTemp);
+  Serial.println(IDLE_TEMP);
   Serial.print("ramp Up rate ");
   Serial.println(activeProfile.rampUpRate);
   Serial.print("soakTemp ");
@@ -844,7 +851,7 @@ void loadProfile(unsigned int targetProfile)
 #ifdef DEBUG
   Serial.println("Check parameters:");
   Serial.print("idleTemp ");
-  Serial.println(idleTemp);
+  Serial.println(IDLE_TEMP);
   Serial.print("ramp Up rate ");
   Serial.println(activeProfile.rampUpRate);
   Serial.print("soakTemp ");
@@ -865,7 +872,7 @@ void loadProfile(unsigned int targetProfile)
 #ifdef DEBUG
   Serial.println("Check parameters:");
   Serial.print("idleTemp ");
-  Serial.println(idleTemp);
+  Serial.println(IDLE_TEMP);
   Serial.print("ramp Up rate ");
   Serial.println(activeProfile.rampUpRate);
   Serial.print("soakTemp ");
@@ -996,7 +1003,7 @@ void factoryReset()
   for (int i = 0; i < 30; i++) {
     saveParameters(i);
   }
-  fanAssistSpeed = fanAssistSpeedDefault;
+  fanAssistSpeed = FANSPEED_DEFAULT;
   saveFanSpeed(0);
   profileNumber = 0;
   saveLastUsedProfile();
@@ -1006,7 +1013,7 @@ void factoryReset()
 void saveFanSpeed(unsigned int var)
 {
   unsigned int temp = (unsigned int) fanAssistSpeed;
-  EEPROM.write(offsetFanSpeed, (temp & 255));
+  EEPROM.write(OFFSET_FANSPEED, (temp & 255));
   lcd.clear();
   lcd.print("Saving...");
   delay(250);
@@ -1016,18 +1023,18 @@ void saveFanSpeed(unsigned int var)
 void loadFanSpeed()
 {
   unsigned int temp = 0;
-  temp = EEPROM.read(offsetFanSpeed);
+  temp = EEPROM.read(OFFSET_FANSPEED);
   fanAssistSpeed = (int) temp;
 }
 
 void saveLastUsedProfile()
 {
-  EEPROM.write(offsetProfileNum, (profileNumber & 255));
+  EEPROM.write(OFFSET_PROFNUM, (profileNumber & 255));
 }
 
 void loadLastUsedProfile()
 {
-  profileNumber = (int) EEPROM.read(offsetProfileNum);
+  profileNumber = (int) EEPROM.read(OFFSET_PROFNUM);
   loadParameters(profileNumber);
 }
 
@@ -1062,9 +1069,9 @@ void sendSerialUpdate()
     Serial.print(", ");
     Serial.print(Setpoint);
     Serial.print(", ");
-    Serial.print(heaterValue*100/WindowSize);
+    Serial.print(heaterValue*100/WINDOW_SIZE);
     Serial.print("%, ");
-    Serial.print(fanValue*100/WindowSize);
+    Serial.print(fanValue*100/WINDOW_SIZE);
     Serial.print("%, ");
     Serial.print(tc1.getTemperature());
     Serial.print(", ");

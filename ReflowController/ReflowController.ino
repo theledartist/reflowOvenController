@@ -28,7 +28,7 @@
 
 //#define DEBUG
 
-#define VERSION "2.82m"  // bump minor version number on small changes, major on large changes, eg when eeprom layout changes
+#define VERSION "2.83"  // bump minor version number on small changes, major on large changes, eg when eeprom layout changes
 
 //--- default parameters -------------------------
 
@@ -36,7 +36,7 @@
                                   // this value controls PWM frequency as well
                                   // slower fan PWM requires lower idle fan speed
 
-#define IDLE_TEMP     50          // the temperature at which to consider the oven safe to leave to cool naturally
+#define IDLE_TEMP     60          // the temperature at which to consider the oven safe to leave to cool naturally
 #define PREHEAT_TEMP  70          // preheat temperature
 #define FANSPEED_DEFAULT 25       // default fan speed
 #define MINIMUM_FAN      10       // minimum fan speed allowed
@@ -46,17 +46,17 @@
 
 #define DEBOUNCE_TIME   50        // button debounce time in milliseconds
 
-#define SOAKSTART_DIFF  1         // start soak this degree lower than set soak temp
+#define MIN_PREHEAT_TIME  45      // minimum time to hold at preheat temp
+#define SOAKSTART_DIFF  2         // start soak this degree lower than set soak temp
 #define SOAK_RAMPUP     (0.1)     // ramp-up rate during soak phase
+
 #define DRYING_TEMP     75        // drying temperature
 #define DRYING_TIME     (60*5)    // drying duration in seconds
 
 //--- PID tuning parameters ------------
-//double Kp = 4, Ki = 0.05, Kd = 2;
-//double fanKp = 1, fanKi = 0.03, fanKd = 10;
 #define Kp    (30.0*WINDOW_SIZE/100) // normalize to percent
 #define Ki    (0.2)  // will be normalized to per second
-#define Kd    (18.0)  // will be normalized to per second
+#define Kd    (12.0)  // (was 18) will be normalized to per second
 #define fanKp (18.0*WINDOW_SIZE/100) // normalize to percent
 #define fanKi (0.1)  // will be normalized to per second
 #define fanKd (1.5)  // will be normalized to per second
@@ -595,7 +595,7 @@ void loop()
 
           if ( (currentState == preHeat)
             && (Input >= Setpoint)
-            && (millis() - stateChangedTime >= (unsigned long) 30 * 1000) ) {
+            && (millis() - stateChangedTime >= (unsigned long) MIN_PREHEAT_TIME * 1000) ) {
             currentState = rampToSoak;
           }
         }

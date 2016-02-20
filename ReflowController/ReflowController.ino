@@ -11,7 +11,6 @@
  http://www.estechnical.co.uk/reflow-ovens/estechnical-reflow-oven
  */
 
-#include <MemoryFree.h>
 #include <MAX31855.h>
 #include <EEPROM.h>
 #include <PID_v1.h>
@@ -50,7 +49,7 @@
 #define SOAKSTART_DIFF  1         // start soak this degree lower than set soak temp
 #define SOAK_RAMPUP     (0.1)     // ramp-up rate during soak phase
 #define DRYING_TEMP     75        // drying temperature
-#define DRYING_TIME     300       // drying duration in seconds
+#define DRYING_TIME     (60*5)    // drying duration in seconds
 
 //--- PID tuning parameters ------------
 //double Kp = 4, Ki = 0.05, Kd = 2;

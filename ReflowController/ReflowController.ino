@@ -37,7 +37,7 @@
                                   // slower fan PWM requires lower idle fan speed
 
 #define IDLE_TEMP     60          // the temperature at which to consider the oven safe to leave to cool naturally
-#define PREHEAT_TEMP  70          // preheat temperature
+#define PREHEAT_TEMP  75          // preheat temperature
 #define FANSPEED_DEFAULT 25       // default fan speed
 #define MINIMUM_FAN      10       // minimum fan speed allowed
 
@@ -441,7 +441,7 @@ void displaySplash()
 
 void setup()
 {
-  Serial.begin(57600);
+  Serial.begin(115200);
   Serial.println("--- Controller Started. ---");
 
   setupMenu();

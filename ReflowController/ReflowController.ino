@@ -686,7 +686,7 @@ void loop()
   // during cooling, the t962a lags a long way behind, hence the hugely lenient cooling allowance.
 
   // both of these errors are blocking and do not exit!
-  //if (Setpoint > Input + 50) abortWithError(1); // if we're 50 degree cooler than setpoint, abort
+  if (Setpoint > Input + 50) abortWithError(1); // if we're 50 degree cooler than setpoint, abort
   //if(Input > Setpoint + 50) abortWithError(2);// or 50 degrees hotter, also abort
 
   // decides which control signal is fed to the output for this cycle

@@ -738,7 +738,7 @@ void loop()
   // if the thermocouple is wired backwards, temp goes DOWN when it increases
   // during cooling, the t962a lags a long way behind, hence the hugely lenient cooling allowance.
 
-  if (Setpoint > Input + 50) abortWithError(1); // if we're 50 degree cooler than setpoint, abort
+//  if (Setpoint > Input + 50) abortWithError(1); // if we're 50 degree cooler than setpoint, abort
 
   // keep fan value above the minimum to make sure the fan actually runs
   if (fanValue > 0 && fanValue < MINIMUM_FAN*WINDOW_SIZE/100) {
